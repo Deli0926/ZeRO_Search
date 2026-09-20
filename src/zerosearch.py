@@ -50,14 +50,96 @@ if args.pareto:
 else:
     node_map = get_node_map(args)
 
+def make_price_table():
+    # 0 A10 : g5.48xlarge, 1 A100, L4, H100 : p4d.24xlarge, g6.48xlarge, p5.48xlarge
+    # on demand price
+    # Default GPU price table
+    default = {
+        "A10": 16.288,
+        "A100": 32.7726,
+        "A6000": 16.200124,
+        "L4": 13.3504,
+        "H100": 98.32,
+        "RTX3090": 16.288
+    }
+
+    print("=" * 50)
+    print("GPU Price Table Input Mode (Press Enter to use default)".center(50))
+    print("=" * 50)
+
+    price_table = {}
+
+    for gpu, default_price in default.items():
+        user_input = input(f"Enter hourly price for {gpu} [Default: {default_price}]: ").strip()
+        if user_input == "":
+            price_table[gpu] = default_price
+        else:
+            try:
+                price_table[gpu] = float(user_input)
+            except ValueError:
+                print("Invalid input. Using default value.")
+                price_table[gpu] = default_price
+    # Final result
+    print("\nFinal GPU Price Table:")
+    print("-" * 40)
+    print(f"{'GPU':<15} {'Price per Hour ($)':>20}")
+    print("-" * 40)
+    for gpu, price in price_table.items():
+        print(f"{gpu:<15} {price:>20.4f}")
+    print("-" * 40)
+
+    return price_table
+
 if args.exhaustive:
-    print("type parallelization strategy you want to search")
-    mbs_exhaustive = int(1)
-    tp_exhaustive = int(4)
-    pp_exhaustive = int(4)
-    dp_exhaustive = int(2)
-    partition_exhaustive = [11, 10, 10, 11]
-    exhaustive_dict = {"mbs":mbs_exhaustive, "tp":tp_exhaustive, "pp":pp_exhaustive,"dp":dp_exhaustive, "partition": partition_exhaustive}
+
+    print("="*40)
+    print("🧠 Parallelization Strategy Configuration 🧠")
+    print("="*40)
+
+    print("Type micro batch size:")
+    mbs_exhaustive = int(input())
+
+    print("Type tensor parallelism dimension:")
+    tp_exhaustive = int(input())
+
+    print("Type pipeline parallelism dimension:")
+    pp_exhaustive = int(input())
+
+    print("Type data parallelism dimension:")
+    dp_exhaustive = int(input())
+
+    print("Type pipeline partition (ex: 10-10-10-10):")
+    partition_exhaustive = input()
+
+    print("Type ZeRO stage (ex: 1):")
+    zero_exhaustive = int(input())
+    exhaustive_dict = {
+        "mbs": mbs_exhaustive,
+        "tp": tp_exhaustive,
+        "pp": pp_exhaustive,
+        "dp": dp_exhaustive,
+        "partition": partition_exhaustive,
+        "zero": zero_exhaustive
+    }
+    
+    print("\n" + "-"*50)
+    print("✅ Your Configuration".center(50))
+    print("-"*50)
+    print(f"{'Parameter':<25} {'Value':>20}")
+    print("-"*50)
+    print(f"{'Micro Batch Size':<25} {mbs_exhaustive:>20}")
+    print(f"{'Tensor Parallelism':<25} {tp_exhaustive:>20}")
+    print(f"{'Pipeline Parallelism':<25} {pp_exhaustive:>20}")
+    print(f"{'Data Parallelism':<25} {dp_exhaustive:>20}")
+    print(f"{'Zero Stage':<25} {zero_exhaustive:>20}")
+    print(f"{'Pipeline Partition':<25} {partition_exhaustive:>20}")
+    print("-"*50)
+
+
+
+#default price_table
+price_table = make_price_table()
+#price_table = {"A10": 16.288, "A100": 32.7726, "A6000": 16.200124, "L4": 13.3504, "H100": 98.32, "RTX3090":16.288 }
 
 gpu_per_node = args.gpu_per_node
 num_node = args.num_node
@@ -85,7 +167,6 @@ if args.pareto:
     A10 = [torch.tensor([100 * 1e9]).float(), torch.tensor([252 * 1e9]).float()]
     A100 = [torch.tensor([400 * 1e9]).float(), torch.tensor([1840* 1e9]).float()]
     A6000 = [torch.tensor([400 * 1e9]).float(), torch.tensor([1840* 1e9]).float()]
-    
 elif args.comm_type == "ib": # 4th generation UBAI cluster
     coff=0.6
     A10 = [torch.tensor([coff * 200 * 1e9]).float(), torch.tensor([coff * 32 * 8 * 1e9]).float()]
@@ -106,9 +187,7 @@ want_simulate = []
 time_s = time.time()
 for cluster in cluster_list: # cluster_list is list of cluster combination. this for loop statement is for pareto options
     # cluster: ['0','0','1','1',...]
-    
-    # cheking cluster_list
-    # assert False, f"cluster: {cluster}"
+    print("DEBUG:",cluster)
     if args.pareto:
         replace_dict = {str(i): node_type[i] for i in range(len(node_type))}
         node_map = {node_type[i]: 0 for i in range(len(node_type)) }
@@ -120,8 +199,8 @@ for cluster in cluster_list: # cluster_list is list of cluster combination. this
         
     D = device_placement(node_map, cluster) # the whole array combination for heterogeneous/homogeneous nodes
     
+
     # checking permunation list
-    # assert False, D
     # remove cache directory from last run
     if os.path.exists(os.path.join(home_path, "tmp")):
         for root, dirs, files in os.walk(os.path.join(home_path, "tmp")):
@@ -137,6 +216,7 @@ for cluster in cluster_list: # cluster_list is list of cluster combination. this
         print(f"d: {d}, node_map: {node_map}")
         node_placement = [ list(node_map.keys())[int(i)] for i in d ]
         print(node_placement)
+        print()
         # node_placement is ['A10','A10','A100','A100',...]
         for i in range(len(node_placement)):
             if node_placement[i] == 'A10':
@@ -156,9 +236,7 @@ for cluster in cluster_list: # cluster_list is list of cluster combination. this
 
         # Estimating best configurations
         # num = 1
-        while True:
-            # print(f"i: {i}")
-            # ret이 끝날때까지 무한 반복            
+        while True:       
             ret = no_placement_strategy_with_zero(args, M=gpu_per_node, N=num_node, gbs=gbs, known=known, num_layers=model_config["num_layers"], dp_method=dp_method, exhaustive_dict=exhaustive_dict)
             
             if ret is None:
@@ -169,7 +247,6 @@ for cluster in cluster_list: # cluster_list is list of cluster combination. this
                     i, tp, dp, pp, mbs, known = ret
                     m = int(gbs / (dp * mbs))
                     parallel_dim = {"tp_deg": torch.ones(1,)*tp,  "pp_deg": torch.ones(1,)*pp, "dp_deg": torch.ones(1,)*dp}
-                    # print(f"(gbs, mbs, tp, pp, dp, dp method): ({gbs}, {mbs}, {tp}, {pp}, {dp}, {i})")
                 else:
                     i, tp, dp, mbs, known = ret
                     m = int(gbs / (dp * mbs))
@@ -178,46 +255,36 @@ for cluster in cluster_list: # cluster_list is list of cluster combination. this
                     
                 fake_config = np.ones((gpu_per_node,num_node)) * (-1)
                 model_args = (fake_config, gbs, mbs, d, model_config, parallel_dim, i) # model_args includes zero stage i 
-                # print(f"model_args(fake_config, gbs, mbs, d, model_config, parallel_dim): {model_args}")
-                # print(f"[{num}] model_args(mbs, parallel_dim): {mbs, i, parallel_dim}")
-                
-                # print(f"mbs, parallel_dim, zero-i: {mbs}, {parallel_dim}, {i}")
-                # try:
                 with torch.no_grad():
                     rank_map, partition, cost, pipecost, dp_side_cost, all_reduce_embedding_cost, \
                         is_oom, oom_gpumem = model(model_args, node_placement)
-                # except:
-                #     pass
-                
+                    
                 for k in parallel_dim:
                     parallel_dim[k] = int(parallel_dim[k].item())
+
                 price_per_sec = 0.0
                 for gpu in node_map:
-                    # 0 A10 : g5.48xlarge, 1 A100, L4, H100 : p4d.24xlarge, g6.48xlarge, p5.48xlarge
-                    # on demand price
-                    price_table = {"A10": 1.4, "A100": 32.7726, "A6000": 16.200124, "L4": 13.3504, "H100": 98.32, "RTX3090":16.288 }
+                    # price_table = {"A10": 16.288, "A100": 32.7726, "A6000": 16.200124, "L4": 13.3504, "H100": 98.32, "RTX3090":16.288 }
                     # price_table = {"A10": 2483, "A6000": 3025, "RTX3090": 2483 }
-                    
                     try:
                         price_per_sec =  price_per_sec + ( price_table[gpu] / 3600) * node_map[gpu]
                         # print(f"price_table[gpu]: {price_table[gpu]}\nprice_per_sec: {price_per_sec}\nnode_map[gpu]: {node_map[gpu]}")
                     except:
                         pass
 
-                # print(f"price_per_sec: {price_per_sec}")
                 price_per_step = price_per_sec * cost.item() # price per second * second per step 
                 pretrain_cost = price_per_step * args.iter
-                # print(f"price_per_step: {price_per_step}\ncost: {cost.item()}")
+
                 # TODO: add ZeRO, overlap_comm
+
                 exp_partition =  [str(partition[0] - 1)] + [str(x) for x in partition[1:-1]] + [str(partition[-1] - 1)]
                 exp_partition = "-".join(exp_partition)
+
                 want_simulate.append((m, mbs, tp, pp, dp, i, False , node_placement, partition, cost.item(), pipecost.item(), dp_side_cost.item(), all_reduce_embedding_cost, is_oom, oom_gpumem.item(), pretrain_cost, price_per_step, exp_partition) + tuple(node_map.values()))
-                # print(f"num: {num}")
-                # num = num + 1                    
+
                 
                     
         e = time.time()
-        # print(f"node placement search time: {e - s:0.5f}")
 print(f"Finished {time.time() - time_s:.5f}")
 
 # sorted_settings = sorted(want_simulate, key = lambda kv: kv[8])
@@ -248,6 +315,7 @@ if args.pretty:
     pretty_columns = ['rank','real_rank','m', 'mbs','tp','pp','dp','dp method'] + list(node_map.keys()) + ['estimated time (s/step)','pipeline time','DP all-reduce time','Emb layer all-reduce time', \
                                               'gpumem','is_oom','node placement', 'exp_partition', 'partition','train_cost','price_per_step']
     df = df[pretty_columns]
+
 # else:
 #     df = df[['rank','real_rank','m', 'mbs','tp','pp','dp','dp method', 'overlap_comm','node placement', 'partition', \
 #                                                 'estimated time (s/step)','pipeline time','DP all-reduce time','Emb layer all-reduce time', \
@@ -267,3 +335,27 @@ if record:
     print("csv file saved at: ", f"{os.path.join(dir_path, record_file)}.csv")
 else:
     print("Done!")
+
+
+
+
+# print best config that is not OOM
+if not df[df['is_oom'] == False].empty:
+    best_row = df[df['real_rank'] == 1].iloc[0]
+
+    print("\n" + "=" * 60)
+    print("Best Configuration (without OOM)".center(60))
+    print("=" * 60)
+    print(f"{'Micro batch size:':<30} {best_row['mbs']}")
+    print(f"{'Tensor parallelism:':<30} {best_row['tp']}")
+    print(f"{'Pipeline parallelism:':<30} {best_row['pp']}")
+    print(f"{'Data parallelism:':<30} {best_row['dp']}")
+    print(f"{'DP method:':<30} {best_row['dp method']}")
+    print(f"{'Estimated time per step (s):':<30} {best_row['estimated time (s/step)']:.4f}")
+    print(f"{'Estimated training cost ($):':<30} {best_row['train_cost']:.2f}")
+    print(f"{'Price per step ($):':<30} {best_row['price_per_step']:.6f}")
+    print(f"{'Node placement:':<30} {best_row['node placement']}")
+    print(f"{'Pipeline partition:':<30} {best_row['exp_partition']}")
+    print("=" * 60)
+else:
+    print("\nNo valid (non-OOM) configurations found.")

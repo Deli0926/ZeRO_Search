@@ -184,6 +184,9 @@ def cost_all_reduce_embedding(args:Namespace, model_config, cluster_info, parall
     tp_degree = int(parallel_config["mp"].item())
     dp_degree = int(parallel_config["dp"].item())
     pp_degree = int(parallel_config["pp"].item())
+    # 통신 개선안 확인
+    dp_method = parallel_config["dp_method"]
+    # 통신 개선안 끝
     rank_node_map = parallel_config["rank_node_map"]
     hidden_size = int(model_config["hidden_size"].item())
     vocab_size = int(model_config["vocab_size"].item())
@@ -212,7 +215,36 @@ def cost_all_reduce_embedding(args:Namespace, model_config, cluster_info, parall
         # else, we assume the bandwidth is shared by all gpu_per_node
         band_width = slowest_bandwidth/min(dp_degree, gpu_per_node) 
         embedding_syn_cost = 2*(2-1)*(hidden_size*vocab_size*precision)/(2*band_width)/tp_degree
-        return embedding_syn_cost.item()
+
+        # 통신 개선안 확인
+        rank_first = axis2rank(axis=(0, dp_degree - 1, tp_degree - 1), mp_deg=tp_degree, dp_deg=dp_degree, pp_deg=pp_degree)
+        rank_last = axis2rank(axis=(pp_degree - 1, dp_degree - 1, tp_degree - 1), mp_deg=tp_degree, dp_deg=dp_degree, pp_deg=pp_degree)
+        node_first = rank_node_map[rank_first]
+        node_last = rank_node_map[rank_last]
+        slowest_bw_intra_node = cluster_info[node_first][1]
+        if cluster_info[node_first][1] > cluster_info[node_last][1]:
+            slowest_bw_intra_node = cluster_info[node_last][1]
+        band_width_ab = slowest_bandwidth
+        embedding_syn_cost_ab = 2*(2-1)*(hidden_size*vocab_size*precision)/(2*band_width_ab)/tp_degree
+        if dp_degree > 1:
+            embedding_syn_cost_ab += (hidden_size*vocab_size*precision)/slowest_bw_intra_node/tp_degree
+        if tp_degree >= gpu_per_node:
+            embedding_syn_cost_ab = embedding_syn_cost
+        ar_ab_rate = embedding_syn_cost / embedding_syn_cost_ab
+        print(f'Emb-AR: {embedding_syn_cost.item():.4f}, Emb-AB: {embedding_syn_cost_ab.item():.4f}')
+        if (ar_ab_rate > 1 and dp_degree < 2) or (ar_ab_rate < 1 and dp_degree > 1):
+            #print("="*50)
+            #print(f'Emb-AR (dp, pp, tp) [zero]: ({dp_degree}, {pp_degree}, {tp_degree}) [{dp_method}]')
+            #print(f'bandwidth: {band_width.item():.4f}\ncost: {embedding_syn_cost.item():.4f}')
+				
+            print("."*50)
+            print(f'Emb-AB (dp, pp, tp) [zero]: ({dp_degree}, {pp_degree}, {tp_degree}) [{dp_method}]')
+            #print(f'bandwidth: {band_width_ab.item():.4f}\ncost: {embedding_syn_cost_ab.item():.4f}')
+
+            #print(f'AR Cost / AB Cost: {ar_ab_rate.item():.4f}')
+            #print("="*50) # 통신 개선안 끝
+        return embedding_syn_cost.item() # Emb AR
+        #return embedding_syn_cost_ab.item() # Emb AB
     else:
         return 0
         
@@ -290,6 +322,8 @@ def dp_cost(args:Namespace, config, cluster_info, model_config, parallel_config,
         
         # precision = 16
         cost = 0.0
+        #print("DEBUG: WHY zero0 vs zero1 Same")
+        #print(dp_method)
         if dp_method in ["dp", "zero0"]:
             # All-Reduce cost: 2(n-1)M / nB
             cost = 2 * (int(dp.item()) - 1) * (param_count * precision) / (int(dp.item()) * bandwidth)
@@ -385,8 +419,8 @@ def predict(args:Namespace, config, gbs, mbs, cluster_info, model_config, zerose
     if model_type in ['gpt2XL','llama2_13B',"llama2_13B_mini"]:
         if exhaustive:
             # print(f"here L : {L}")
-            if args.search_method == "minmax":
-                partition, stage_comp_time_lst, _, _, stage_for_send_time_lst, stage_back_send_time_lst  = explain_minmax(L+2, cost_e, np.asarray(cost_c), pp_degree, gpu_type_lst, exhaustive_dict["partition"])
+            if args.search_method == "minmax": # 아래에 stage_comm_time_lst는 '김민서'가 emb-ab 계산을 위해 넣음
+                partition, stage_comp_time_lst, stage_comm_time_lst, _, stage_for_send_time_lst, stage_back_send_time_lst  = explain_minmax(L+2, cost_e, np.asarray(cost_c), pp_degree, gpu_type_lst, exhaustive_dict["partition"])
                 
                 pipecost_last, stage_wise_cost_lst = schedule(pp_degree, 
                                                         num_mb, stage_comp_time_lst, 
@@ -399,8 +433,8 @@ def predict(args:Namespace, config, gbs, mbs, cluster_info, model_config, zerose
             elif args.search_method == "ga":
                 partition, pipecost_last, stage_wise_cost_lst = ga(L+2, parallel_config, cost_e, np.asarray(cost_c), gpu_type_lst)
         else:
-            if args.search_method == "minmax":
-                partition, stage_comp_time_lst, _, _, stage_for_send_time_lst, stage_back_send_time_lst  = minmax(L+2, cost_e, np.asarray(cost_c), pp_degree, gpu_type_lst)
+            if args.search_method == "minmax": # 아래에 stage_comm_time_lst는 '김민서'가 emb-ab 계산을 위해 넣음
+                partition, stage_comp_time_lst, stage_comm_time_lst, _, stage_for_send_time_lst, stage_back_send_time_lst  = minmax(L+2, cost_e, np.asarray(cost_c), pp_degree, gpu_type_lst)
                 pipecost_last, stage_wise_cost_lst = schedule(pp_degree, 
                                                         num_mb, stage_comp_time_lst, 
                                                         stage_for_send_time_lst, 
@@ -431,6 +465,15 @@ def predict(args:Namespace, config, gbs, mbs, cluster_info, model_config, zerose
     max_latency_index = end2end_stage_latency.index(max_latency)
     
     dp_side_cost_last = dp_cost_list[max_latency_index]
+    # 임베딩 통신 시간 비중 확인하는 부분
+    pipe_comm_cost = (sum(stage_for_send_time_lst) + sum(stage_comm_time_lst) + sum(stage_back_send_time_lst)) * num_mb
+    total_comm_cost = dp_side_cost_last.item() + pipe_comm_cost.item() + all_reduce_embedding_cost
+    if total_comm_cost != 0:
+        emb_comm_ratio = all_reduce_embedding_cost / total_comm_cost * 100
+        if pp_degree > 1:
+            print(f"dp: {int(dp_degree)}, pp: {pp_degree}, tp: {int(tp_degree)}, zero: {dp_method}")
+            print(f"emb_comm: {all_reduce_embedding_cost:.4f}, total_comm: {total_comm_cost:.4f}, ratio: {emb_comm_ratio:.4f}%")
+    # 여기까지
 
     if exhaustive is True:
         print(f"dp method: {dp_method}")
@@ -467,6 +510,9 @@ def EstimatePeakMemory(args:Namespace, partition, model_config, parallel_config,
     memory_side = {"weight":[], "activation":[]}
     oom_list = []
     p = pp
+    
+    #coef는 곱해주기 위한 계수
+    coef = pp
     if num_mb > pp:
         p = pp
     else:
@@ -505,7 +551,16 @@ def EstimatePeakMemory(args:Namespace, partition, model_config, parallel_config,
                     
                     # debugging
                     # activation += (s * b * p * h ) * (10 + ( 24 / tp ) + 5 * (a * s) / (h * tp) )  # tensor + sequence
-                    activation += (10*s*b*h + (16/tp)*s*b*h + (2*s*b*d/tp) + (5/tp)*kv_value*s*s*b) * (1 + (pp-1)/(pp*m))
+                    
+                    #원본
+                    #activation += (10*s*b*h + (8/tp)*s*b*h + (4*s*b*d/tp) + (5/tp)*kv_value*s*s*b) * (1 + (pp-1)/(pp*m)) * p
+                    
+                    #1차 변경
+                    #activation += (10*s*b*h + (8/tp)*s*b*h + (4*s*b*d/tp) + (5/tp)*kv_value*s*s*b) * (1 + (pp-1)/(pp*m)) * p
+                    activation += (10*s*b*h + (8/tp)*s*b*h + (4*s*b*d/tp) + (5/tp)*kv_value*s*s*b) * (1 + (pp-1)/(pp*m)) * min(coef, num_mb)
+
+                    #2차변경
+                    #activation += (10*s*b*h + (16/tp)*s*b*h + (2*s*b*d/tp) + (5/tp)*kv_value*s*s*b) * (1 + (pp-1)/(pp*m)) *p
                     # print(f"activation: stage {j}th layer {i}th {activation.item()/1024/1024/1024}")
                 else:
                     param_count += ( 12 * h ** 2 ) / tp
@@ -526,26 +581,24 @@ def EstimatePeakMemory(args:Namespace, partition, model_config, parallel_config,
                 
                 # debugging
                 # print(f"[{j}]: layer_type: {layer_type[i]} param_count:{int(param_count.item())} activation: {int(activation.item())}")
-        
+        coef = coef - 1
         # debugging
         # print(f"stage {j}th actication: {activation} ")    
         memory_side["activation"].append(activation)
         if dp.item() > 1:
             if dp_method in ['fsdp']:
                 weight = param_count * (4 + (16 / dp))
-                
             elif dp_method in ["zero1"]:
-                weight = 4 * param_count + ( 16 * param_count / dp)
-                
+                weight = 8 * param_count + ( 12 * param_count / dp)
             elif dp_method in ["zero2"]:
                 weight = 4 * param_count + ( 16 * param_count / dp)
             elif dp_method in ["zero3"]:
                 transformer_layer = ( h * v  )
                 weight = 4 * transformer_layer * M * additional_buffer_factor + (18 * param_count / dp)
             else:
-                weight = param_count * 18                 
+                weight = param_count * 20                 
         else:           
-            weight = param_count * 18
+            weight = param_count * 20
             
         # debugging     
         # print(f"weight memory: {weight}")
@@ -557,13 +610,14 @@ def EstimatePeakMemory(args:Namespace, partition, model_config, parallel_config,
         # print(f"num sublayer: {stage} major: {estimated_memory.item():.2f}")
         # print(f"estimated memory: {estimated_memory.item():.4f}")
         
-        gpumem = estimated_memory * error_percent
+        estimated_memory *= error_percent
+        gpumem = estimated_memory
         memory.append(estimated_memory)
         oom_list.append(oom)
         if args.exhaustive:
             pass
         else:
-            if estimated_memory * error_percent > gpu_memory[gpu_type_lst[j]]:
+            if estimated_memory > gpu_memory[gpu_type_lst[j]]:
                 oom = True
                 # TODO: return not search
                 return oom, gpumem

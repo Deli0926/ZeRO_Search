@@ -50,15 +50,15 @@ def get_cluster_list(args:Namespace, node_map):
         for A in range(0, num_node+1):
             for B in range(0, num_node+1):
                 cluster = {}
-                # if A + B <= num_node:
-                for i in range(A + B):
-                    cluster[i] = '0'
-                for i in range(A):
-                    cluster.update({i:'1'})
-                if len(cluster.keys())>0:
-                    cluster_combinations.append(cluster)
-                num_c += 1
-                print(f"[{num_c}] {cluster}")
+                if A + B <= num_node:
+                    for i in range(A + B):
+                        cluster[i] = '0'
+                    for i in range(A):
+                        cluster.update({i:'1'})
+                    if len(cluster.keys())>0:
+                        cluster_combinations.append(cluster)
+                    num_c += 1
+                    print(f"[{num_c}] {cluster}")
         # print(f"Number of clusters combinations: {num_c}")
         # assert False
         return cluster_combinations

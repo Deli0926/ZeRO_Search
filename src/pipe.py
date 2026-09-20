@@ -109,15 +109,16 @@ def minmax(num_layer, cost_e, cost_c, pp_degree, gpu_type_lst):
 def explain_minmax(num_layer, cost_e, cost_c, pp_degree, gpu_type_lst, partition):
     
     num_balanced_layer = num_layer // pp_degree
-    # partition = partition
+    #partition = partition
     partition = []    
     print(f"pp_degree: {pp_degree}")
+    
     for i in range(pp_degree):
         partition.append(num_balanced_layer)
     rest = int(num_layer - (num_balanced_layer * pp_degree))
     for i in range(rest):
         partition[i-1] += 1
-    
+    """
     partition_history = []
     partition_history.append(partition[:])
     
@@ -172,12 +173,13 @@ def explain_minmax(num_layer, cost_e, cost_c, pp_degree, gpu_type_lst, partition
             break
         # print(f"2 max_latency: {max_latency}")
     # print(f"max index: {max_latency_index}")
+    """
+    stage_latency = get_stage_latency(partition, cost_e, cost_c, gpu_type_lst) # 여기 추가함 / 2025-05-28
     stage_time_lst = [stage.get_stage_time() for stage in stage_latency]
     stage_comp_time_lst = [stage.get_comp_time() for stage in stage_latency]
     stage_comm_time_lst = [stage.get_comm_time() for stage in stage_latency]
     stage_for_send_time_lst = [stage.get_for_send_time() for stage in stage_latency]
     stage_back_send_time_lst = [stage.get_back_send_time() for stage in stage_latency]
-    
     
     return partition, stage_comp_time_lst, stage_comm_time_lst, stage_time_lst, stage_for_send_time_lst, stage_back_send_time_lst
 

@@ -169,26 +169,25 @@ class PPGroup:
                     next_stage_time.set_for_recv_end_time_lst_elem(j, send_end_time)
 
     def __simulate_1f1b(self):
-        for j in range(self.num_mb): # 2행
+        for j in range(self.num_mb):
             #1f
-            for i in range(self.pp_degree): # 3행
-                stage_time = self.stage_time_lst[i] # stage_time list
-                num_warmup_mb = self.num_warmup_mb_lst[i] # wmb list
-                forward_mb_id = j+num_warmup_mb # 4행
+            for i in range(self.pp_degree):
+                stage_time = self.stage_time_lst[i]
+                num_warmup_mb = self.num_warmup_mb_lst[i]
+                forward_mb_id = j+num_warmup_mb
 
                 if forward_mb_id >self.num_mb-1:
-                    continue # 5행
+                    continue
 
                 next_stage_time = None
-                if i<self.pp_degree-1: # 만약 다음 stage가 존재한다면
-                    next_stage_time = self.stage_time_lst[i+1] # stage_time list에서 value 가져옴.
-                forward_time = stage_time.forward_time # stage_time에서 cf, sf time 가져옴.
+                if i<self.pp_degree-1:
+                    next_stage_time = self.stage_time_lst[i+1]
+                forward_time = stage_time.forward_time
                 send_for_time = stage_time.send_for_time
 
                 # first 1f
-                if forward_mb_id == num_warmup_mb: # 6행
+                if forward_mb_id == num_warmup_mb:
                     prev_comp_id = forward_mb_id-1
-                    # last stage에만 warmup forward가 없음 --> sf = 0으로 set.
                     # has warmup forward
                     if prev_comp_id >= 0:
                         prev_send_end_time = stage_time.get_for_send_end_time_lst_elem(prev_comp_id)
@@ -198,8 +197,7 @@ class PPGroup:
                         prev_send_end_time = 0.
 
                     recv_end_time = stage_time.get_for_recv_end_time_lst_elem(forward_mb_id)
-                    forward_start_time = max(prev_send_end_time, recv_end_time) # 10행. pseudo-code와 차이점: 8, 10, 12행을 max(rf, sf)로 처리함.
-                    # 8행은 rf = 0, 12행은 sf = 0으로 설정하게 됨.
+                    forward_start_time = max(prev_send_end_time, recv_end_time)
                     stage_time.set_for_compute_start_time_lst_elem(forward_mb_id, forward_start_time)
                     forward_end_time = forward_start_time + forward_time
                     stage_time.set_for_compute_end_time_lst_elem(forward_mb_id, forward_end_time)

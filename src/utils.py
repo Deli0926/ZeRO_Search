@@ -57,6 +57,7 @@ def get_dp_method(args:Namespace):
         assert False, "you have to chooese framework among m, d, both, and default"
 
     if args.exhaustive:
+        print("DEBUG: IS changed?")
         dp_method = "zero3"
         overlap = False
     return dp_method
@@ -112,7 +113,8 @@ def no_placement_strategy_with_zero(args:Namespace, M, N, gbs, known, num_layers
             tp = exhaustive_dict["tp"]
             dp = exhaustive_dict["dp"]
             pp = exhaustive_dict["pp"]
-            i = "zero0"
+            i="zero"+str(exhaustive_dict["zero"])
+            #i = "zero1"
             ele_count += 1
             print(f"mbs:{mbs}, tp:{tp}, dp:{dp}, pp:{pp}, i:{i}")
             return i, tp, dp, pp, mbs, known

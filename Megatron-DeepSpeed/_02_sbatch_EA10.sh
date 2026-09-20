@@ -73,7 +73,7 @@ SRUN_SCRIPT=$(cat <<EOF
 
     enroot start --root \
                 --rw \
-                -m $HOME/ZeROSearch/Megatron-DeepSpeed:/Megatron-DeepSpeed \
+                -m $HOME/ZeRO_Search/Megatron-DeepSpeed:/Megatron-DeepSpeed \
                 $CONTAINER_NAME \
                 bash -c "$ENROOT_SCRIPT \$NODE_RANK $MASTER_ADDR \$hostnode"
 EOF
